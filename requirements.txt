@@ -1,0 +1,25 @@
+# ==========================================================
+# CFF → VTM/VTU 배치 변환기 — Python 의존성
+# ==========================================================
+# 이 파일은 GUI(pv_export_gui.py) 실행 환경(일반 Python / venv)용입니다.
+#
+# 설치:
+#   pip install -r requirements.txt
+#
+# 요구 Python: 3.9 이상
+# ==========================================================
+
+# GUI 프레임워크 (pv_export_gui.py)
+PySide6
+
+# ----------------------------------------------------------
+# 참고: pip로 설치하지 않는 의존성
+# ----------------------------------------------------------
+# - ParaView 6.1.0 (권장): pvpython 포함. 실제 변환 엔진.
+#     공식 사이트에서 별도 설치: https://www.paraview.org/download/
+#     워커(pv_export_worker.py)는 ParaView 내장 pvpython으로 실행되며
+#     paraview.simple 모듈을 사용합니다. (pip 설치 불가)
+#
+# - 표준 라이브러리만 사용 (별도 설치 불필요):
+#     argparse, csv, datetime, glob, json, os, re, shutil, subprocess, sys, time, pathlib, xml.etree
+
