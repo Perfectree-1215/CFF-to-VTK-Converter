@@ -1,7 +1,7 @@
 # Fluent CFF 유틸리티
 
 ANSYS Fluent 결과를 다루는 두 가지 도구를 **탭 하나로 묶은** 데스크톱 앱입니다.
-자세한 앱 사용 방법은 **'USER_GUIDE.md'**를 확인하시기 바랍니다.
+자세한 앱 사용 방법은 **USER_GUIDE.md**를 확인하시기 바랍니다.
 
 1. **Workbench DP 정리** — 파라메트릭(Design Point) 결과의 Case/Data를 DP 이름(dp_001, dp_002 …)으로 복사·이름변경
 2. **CFF To VTK** — CFF 결과(`.cas.h5` / `.dat.h5`)를 ParaView로 VTM/VTU 일괄 변환
