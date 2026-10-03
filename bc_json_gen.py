@@ -25,6 +25,10 @@ optiSLang 설계 테이블 CSV에서 자동 생성한다. (앱 통합용 모듈 
   B) Workbench/optiSLang 설계점 내보내기: '# ' 주석 선행 행 + 파라미터 정의 주석
      ('P1 - Inlet_length [mm]' …) + 'Name,P1,P2,…' 헤더(P번호 참조),
      설계 열 'Name'(값 'DP 0' …). 주석의 정의를 파싱해 이름으로 열을 매칭한다.
+  C) 간단한 파라미터 CSV (v2.0, 사용자 제공 Parameters.csv 형식 — tests/data/Parameters.csv): 첫 행이 헤더
+     'Name,inlet_length,cone_length,vortex_finder_length', 설계 열 'Name'(값 'DP 0' …),
+     나머지 열 이름이 곧 JSON 키. **파라미터 매핑을 비우면**(param_cols 가 빈 dict)
+     설계번호 열을 뺀 모든 열을 CSV 순서대로 키로 쓴다 (자동 모드). EXAMPLE_CSV_TEXT 참고.
 """
 
 import argparse
@@ -50,6 +54,41 @@ DEFAULT_PARAM_COLS = {
 DEFAULT_JSON_NAME = "boundary_conditions.json"
 DEFAULT_SIDECAR_NAME = "design_info.json"
 DEFAULT_DESIGN_COL_HINT = "#"
+
+# 예시 CSV (사용자 제공 Parameters.csv 의 형식 그대로 — 헤더 1행 + 'DP n' 행). GUI 의 [예시 CSV 저장] 이 이 내용을 쓴다.
+EXAMPLE_CSV_NAME = "Parameters_example.csv"
+EXAMPLE_CSV_TEXT = (
+    "Name,inlet_length,cone_length,vortex_finder_length\n"
+    "DP 0,150,0.36,280\n"
+    "DP 1,238.95,0.09035,60.15\n"
+    "DP 2,84.25,0.39125,306.65\n"
+    "DP 3,208.35,0.29435,65.95\n"
+    "DP 4,186.25,0.12265,152.95\n"
+)
+
+# CSV 작성 방법 (GUI 안내 대화상자·툴팁·문서 공용). 줄 바꿈 그대로 표시한다.
+CSV_FORMAT_HELP = """설계 테이블 CSV 작성 방법 (예: Parameters.csv)
+
+1) 첫 행은 열 이름(헤더)입니다. 구분자는 콤마(,)·세미콜론(;)·탭 중 하나로 통일합니다 (자동 감지).
+2) 첫 열은 설계 번호입니다. 열 이름은 'Name' 또는 '#', 값은 'DP 0', 'DP 1' … 또는 0, 1, 2 … (끝의 정수를 번호로 읽습니다).
+   → 설계 폴더 Design_000, Design_001 … 과 번호로 짝을 맞춥니다 (폴더 번호 = CSV 번호 + 오프셋).
+3) 나머지 열이 파라미터입니다. 열 이름이 그대로 JSON 키가 되고, 열 순서가 JSON 키 순서(= Stochos X_global_feat 열 순서)가 됩니다.
+   키 이름은 영문·숫자·밑줄만 쓰는 것이 안전합니다 (단위는 적지 마세요: inlet_length, cone_length …).
+4) 값은 숫자만 적습니다 (소수점은 . 또는 , 모두 가능, 천 단위 구분 기호는 쓰지 마세요). 빈 칸·문자가 있으면 그 설계는 '값 변환 실패'로 건너뜁니다.
+5) 인코딩은 UTF-8(BOM 허용)·ANSI 모두 됩니다. 엑셀에서 'CSV UTF-8(쉼표로 분리)' 로 저장하면 됩니다.
+
+예시:
+""" + EXAMPLE_CSV_TEXT + """
+파라미터 매핑(선택): 열 이름과 다른 키 이름을 쓰거나 일부 열만 내보내려면 한 줄에 하나씩 'json_key = CSV열' 로 적습니다.
+비워 두면 위 3) 규칙대로 모든 열을 그대로 씁니다. Workbench 설계점 내보내기(P1, P2 … 헤더 + '# P1 - Inlet_length [mm]' 주석)도 그대로 읽습니다."""
+
+
+def write_example_csv(path):
+    """예시 CSV 를 path 에 쓴다 (UTF-8 BOM, CRLF — 엑셀에서 바로 열림). 반환: 쓴 경로(Path)."""
+    out = Path(path)
+    with open(out, "w", encoding="utf-8-sig", newline="") as f:
+        f.write(EXAMPLE_CSV_TEXT.replace("\n", "\r\n"))
+    return out
 
 _TRAILING_INT = re.compile(r"(\d+)\s*$")
 _DELIM_NAMES = {"\t": "탭(\\t)", ";": "세미콜론(;)", ",": "콤마(,)"}
@@ -80,12 +119,10 @@ class BCGenConfig:
     delimiter: str = "auto"                # "auto" 또는 "\t" / ";" / ","
     design_col_hint: str = DEFAULT_DESIGN_COL_HINT
     design_number_offset: int = 0          # 폴더 번호 = CSV 번호 + offset
+    # 비어 있으면(빈 dict) 자동 모드: 설계번호 열을 뺀 CSV 열 전부를 그 순서대로 JSON 키로 쓴다 (v2.0)
     param_cols: dict = field(default_factory=lambda: dict(DEFAULT_PARAM_COLS))
     json_name: str = DEFAULT_JSON_NAME
     sidecar_name: str = DEFAULT_SIDECAR_NAME   # None 이면 사이드카 미생성
-    # CSV에 없는 설계(예: optiSLang이 내보내지 않는 기준설계 DP0)를 직접 입력한 값으로 채움.
-    # {설계번호: {json_key: 값}} — 값은 to_float 로 변환, 키는 param_cols 순서로 정렬됨.
-    manual_designs: dict = field(default_factory=dict)
     dry_run: bool = True
 
 
@@ -99,6 +136,7 @@ class BCGenReport:
     write_failed: list = field(default_factory=list)   # (설계번호, 대상경로, 오류메시지)
     key_order_ok: bool = True
     matched_columns: dict = field(default_factory=dict)  # json_key → CSV 열
+    auto_params: bool = False                          # 매핑 없이 CSV 열을 그대로 키로 썼는가 (v2.0)
     delimiter: str = ""
     design_col: str = ""
     folders_found: int = 0
@@ -232,7 +270,14 @@ def read_csv_rows(csv_path, delimiter="auto"):
     candidates = ("\t", ";", ",") if delimiter == "auto" else (delimiter,)
     cand_names = ("탭/세미콜론/콤마" if delimiter == "auto"
                   else _DELIM_NAMES.get(delimiter, repr(delimiter)))
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+    # 인코딩: UTF-8(BOM 허용) 우선, 실패하면 한글 Windows 엑셀의 'CSV(쉼표로 분리)' = cp949 로 재시도
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        text = path.read_text(encoding="cp949")
+        log.info("UTF-8 로 읽히지 않아 cp949(한글 Windows) 로 읽었습니다")
+    import io
+    with io.StringIO(text, newline="") as f:
         first_line = None
         comment_lines = []
         skipped = 0
@@ -266,6 +311,9 @@ def read_csv_rows(csv_path, delimiter="auto"):
         reader = csv.DictReader(f, delimiter=delim)
         rows = list(reader)
         headers = [h.strip() for h in (reader.fieldnames or [])]
+        # 헤더 앞뒤 공백을 지운 이름으로 행 키도 맞춘다 (안 그러면 row[csv_col] 이 KeyError → 전부 값 변환 실패)
+        if any(h != h.strip() for h in (reader.fieldnames or []) if h):
+            rows = [{(k.strip() if isinstance(k, str) else k): v for k, v in r.items()} for r in rows]
     if not rows:
         raise BCGenError("CSV에 데이터 행이 없습니다.")
     if len(headers) < 2:
@@ -315,9 +363,6 @@ def generate_bc_jsons(config):
     dry_run=True 이면 파일시스템을 변경하지 않고 매칭/리포트만 수행한다.
     복구 불가 오류는 BCGenError 로 던진다.
     """
-    if not config.param_cols:
-        raise BCGenError("파라미터 매핑(param_cols)이 비어 있습니다.")
-
     report = BCGenReport(dry_run=config.dry_run)
     report.sidecar_enabled = bool(config.sidecar_name)
 
@@ -349,8 +394,36 @@ def generate_bc_jsons(config):
                          % (config.design_col_hint, headers[:8]))
     report.design_col = design_col
 
+    # 파라미터 매핑이 비어 있으면 자동 모드: 설계번호 열을 뺀 모든 열을 CSV 순서대로 JSON 키로 (v2.0)
+    if config.param_cols:
+        param_cols = config.param_cols
+    else:
+        param_cols = {}
+        for h in headers:
+            if not h or h == design_col:
+                continue
+            key = param_defs.get(h, h)          # Workbench 'P1' 헤더면 주석의 이름을 키로
+            if key.lower().endswith(("_op", "-op")):
+                log.warning("'%s' 열은 출력(op) 열로 보여 자동 모드에서 제외합니다 (필요하면 매핑에 직접 적으세요)", key)
+                continue
+            sample = next((r.get(h) for r in rows if str(r.get(h) or "").strip()), None)
+            if sample is not None:
+                try:
+                    to_float(sample)
+                except (ValueError, TypeError):
+                    log.warning("'%s' 열은 숫자가 아니라(예: %r) 자동 모드에서 제외합니다", key, sample)
+                    continue
+            if key in param_cols:
+                raise BCGenError("JSON 키가 겹칩니다: '%s' (CSV 열 '%s' 와 '%s'). 매핑으로 이름을 정해 주세요" % (key, param_cols[key], h))
+            param_cols[key] = h
+        if not param_cols:
+            raise BCGenError("설계 번호 열('%s') 외에 파라미터 열이 없습니다. CSV 열: %s" % (design_col, headers))
+        report.auto_params = True
+        log.info("파라미터 매핑 없음 → CSV 열 %d개를 그 순서대로 JSON 키로 사용: %s",
+                 len(param_cols), list(param_cols))
+
     col_map = {}
-    for json_key, hint in config.param_cols.items():
+    for json_key, hint in param_cols.items():
         col = match_column(headers, hint, param_defs)
         if col is None:
             raise BCGenError("파라미터 열('%s')을 찾지 못했습니다. CSV 열: %s ..."
@@ -409,13 +482,10 @@ def generate_bc_jsons(config):
             }
         _emit_design(config, report, folders[num], num, bc, info)
 
-    # 수동 기준설계 입력 처리 (CSV에 없는 폴더, 예: DP0/Design_000 채우기)
-    manual_written = _apply_manual_designs(config, report, folders)
-
-    report.folder_only = sorted(set(folders) - csv_numbers - manual_written)
+    report.folder_only = sorted(set(folders) - csv_numbers)
 
     # 키 순서 일관성: 생성물이 있으면 실제 파일을 읽어 검증, 아니면 정의 순서로 True.
-    report.key_order_ok = _verify_key_order(config, folders, report)
+    report.key_order_ok = _verify_key_order(config, folders, report, list(col_map))
     return report
 
 
@@ -433,7 +503,7 @@ def _write_json(path, obj):
 def _emit_design(config, report, folder, num, bc, sidecar_info):
     """한 설계의 bc JSON(+사이드카)을 기록하고 report 를 갱신.
 
-    dry_run 이면 카운트만 하고 True. 실제 실행 시 bc JSON 쓰기가 성공하면 True
+    dry_run 이면 카운트만 한다. 실제 실행 시 bc JSON 쓰기가 성공하면 True
     (사이드카는 독립적으로 시도 — 실패해도 bc 생성/카운트에는 영향 없음),
     bc JSON 쓰기가 OSError 로 실패하면 write_failed 에 기록 후 False.
     """
@@ -462,57 +532,8 @@ def _emit_design(config, report, folder, num, bc, sidecar_info):
     return True
 
 
-def _apply_manual_designs(config, report, folders):
-    """CSV에 없는 설계를 사용자가 직접 입력한 값으로 채운다. 채운 설계번호 집합을 반환.
-
-    optiSLang이 내보내지 않는 기준설계(DP0/Design_000) 등을 위한 경로.
-    bc 는 param_cols 정의 순서로 구성해 키 순서(=X_global_feat 열 순서) 불변 규칙을 보존한다.
-    """
-    manual_written = set()
-    for num, raw_values in (config.manual_designs or {}).items():
-        if num in report.written:
-            log.warning("수동 입력 설계 %s: 이미 CSV로 생성됨 → 무시", num)
-            continue
-        bc = {}
-        ok = True
-        for json_key in config.param_cols:      # 정의 순서 보존
-            if json_key not in raw_values:
-                report.bad_value.append((num, json_key, "(수동 입력 누락)"))
-                ok = False
-                break
-            try:
-                bc[json_key] = to_float(raw_values[json_key])
-            except (ValueError, TypeError):
-                report.bad_value.append((num, json_key, raw_values.get(json_key)))
-                ok = False
-                break
-        if not ok:
-            continue
-        if num not in folders:
-            report.no_folder.append(num)
-            continue
-        if len(report.previews) < 3:
-            report.previews.append("수동 DP%s → 폴더 '%s' : %s"
-                                   % (num, folders[num].name, bc))
-        info = None
-        if config.sidecar_name and not config.dry_run:
-            info = {
-                "design_name": folders[num].name,
-                "csv_design_number": None,       # 수동 입력이라 CSV 번호 없음
-                "folder_design_number": num,
-                "source_csv": Path(config.csv_path).name,
-                "source": "manual",              # 수동 입력 표시 (Stochos 미사용)
-                "generated_at": datetime.now().isoformat(timespec="seconds"),
-                "parameters": bc,
-            }
-        if _emit_design(config, report, folders[num], num, bc, info):
-            manual_written.add(num)
-    return manual_written
-
-
-def _verify_key_order(config, folders, report):
-    """전 설계의 bc JSON 키 순서가 param_cols 정의 순서와 동일한지 검증."""
-    expected = list(config.param_cols.keys())
+def _verify_key_order(config, folders, report, expected):
+    """전 설계의 bc JSON 키 순서가 param_cols(또는 자동 모드의 CSV 열) 순서와 동일한지 검증."""
     if config.dry_run or not report.written:
         return True   # 생성 안 함 → 정의 순서로 동일함이 보장됨
     for num in report.written:
@@ -547,8 +568,8 @@ def _parse_params(items):
 def build_arg_parser():
     p = argparse.ArgumentParser(
         description="optiSLang CSV → 설계별 boundary_conditions.json 생성 (Stochos용)")
-    p.add_argument("--csv", "-c", required=True, help="설계 테이블 CSV 경로")
-    p.add_argument("--root", "-r", action="append", required=True,
+    p.add_argument("--csv", "-c", required=False, default=None, help="설계 테이블 CSV 경로")
+    p.add_argument("--root", "-r", action="append", required=False, default=None,
                    help="설계 폴더들의 부모 경로 (여러 번 지정 가능)")
     p.add_argument("--delimiter", "-d", default="auto",
                    help=r"구분자: auto(기본) 또는 \t / ; / ,")
@@ -558,13 +579,13 @@ def build_arg_parser():
                    help="폴더 번호 = CSV 번호 + offset (기본 0)")
     p.add_argument("--param", action="append", metavar="KEY=COL",
                    help="파라미터 매핑(순서 유지). 미지정 시 기본 3개 사용")
+    p.add_argument("--auto-params", action="store_true",
+                   help="매핑 없이 설계번호 열을 뺀 CSV 열 전부를 그 순서대로 JSON 키로 사용 (Parameters.csv 형식)")
+    p.add_argument("--write-example", metavar="PATH",
+                   help="예시 CSV(Parameters_example.csv 형식)를 PATH 에 쓰고 종료")
     p.add_argument("--json-name", default=DEFAULT_JSON_NAME)
     p.add_argument("--sidecar-name", default=DEFAULT_SIDECAR_NAME)
     p.add_argument("--no-sidecar", action="store_true", help="사이드카 미생성")
-    p.add_argument("--manual-design", type=int, metavar="NUM",
-                   help="CSV에 없는 설계 번호를 직접 값으로 채움 (예: 기준설계 0)")
-    p.add_argument("--manual-value", action="append", metavar="KEY=VAL",
-                   help="--manual-design 의 파라미터 값 (param 키와 동일, 여러 번)")
     p.add_argument("--execute", action="store_true",
                    help="실제 생성 (미지정 시 DRY-RUN: 파일 미변경)")
     return p
@@ -595,6 +616,9 @@ def report_to_lines(report):
             or report.write_failed):
         lines.append("불일치 없음 — 모든 설계 폴더와 CSV 행이 1:1로 매칭되었습니다.")
     lines.append("키 순서 일관성: %s" % ("통과" if report.key_order_ok else "불일치"))
+    if report.matched_columns:
+        lines.append("JSON 키 (%s): %s" % ("CSV 열 그대로" if report.auto_params else "매핑",
+                                         ", ".join(report.matched_columns)))
     return lines
 
 
@@ -607,10 +631,18 @@ def main(argv=None):
             pass
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = build_arg_parser().parse_args(argv)
-    param_cols = _parse_params(args.param) if args.param else dict(DEFAULT_PARAM_COLS)
-    manual_designs = {}
-    if args.manual_design is not None:
-        manual_designs = {args.manual_design: _parse_params(args.manual_value or [])}
+    if args.write_example:
+        out = write_example_csv(args.write_example)
+        print("예시 CSV 저장: %s" % out)
+        print(CSV_FORMAT_HELP)
+        return 0
+    if args.auto_params:
+        param_cols = {}
+    else:
+        param_cols = _parse_params(args.param) if args.param else dict(DEFAULT_PARAM_COLS)
+    if not args.csv or not args.root:
+        print("[오류] --csv 와 --root 가 필요합니다 (--write-example 만 예외).", file=sys.stderr)
+        return 2
     config = BCGenConfig(
         csv_path=args.csv,
         data_roots=args.root,
@@ -620,7 +652,6 @@ def main(argv=None):
         param_cols=param_cols,
         json_name=args.json_name,
         sidecar_name=(None if args.no_sidecar else args.sidecar_name),
-        manual_designs=manual_designs,
         dry_run=(not args.execute),
     )
     try:

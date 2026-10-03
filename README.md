@@ -1,64 +1,59 @@
-# Fluent CFF 유틸리티
+# Fluent CFF 유틸리티 (v2.1)
 
-ANSYS Fluent 결과를 다루는 두 가지 도구를 **탭 하나로 묶은** 데스크톱 앱입니다.
-자세한 앱 사용 방법은 **USER_GUIDE.md**를 확인하시기 바랍니다.
+ANSYS Fluent 결과(CFF: `.cas.h5` + `.dat.h5`)를 정리하고 VTK 파일(VTU/VTP)로 바꾸는 Windows 데스크톱 앱입니다.
+탭 네 개로 되어 있고, 보통 **왼쪽 탭부터 오른쪽으로** 순서대로 씁니다.
 
-1. **Workbench DP 정리** — 파라메트릭(Design Point) 결과의 Case/Data를 DP 이름(dp_001, dp_002 …)으로 복사·이름변경
-2. **CFF To VTK** — CFF 결과(`.cas.h5` / `.dat.h5`)를 ParaView로 VTM/VTU 일괄 변환
+| 탭 | 하는 일 | 추가로 필요한 것 |
+|---|---|---|
+| **Workbench DP 정리** | Workbench 의 `dp0, dp1 …` 폴더에 흩어진 Case/Data 를 `dp_001.cas.h5` / `dp_001.dat.h5` 로 복사·이름 통일 | 없음 |
+| **PyVista 변환기** | CFF → `Design_NNN/Results.vtu`(체적) 또는 `Results.vtp`(외곽 표면). 폴더 안의 모든 케이스를 한 번에. 빠르고 라이선스 불필요 | ParaView 엔진을 고를 때만 ParaView |
+| **PyFluent 변환기** | 창 없는 Fluent 를 띄워 같은 CFF 를 VTU(Fluent 격자 그대로) / VTP(경계면을 한 장으로, `boundary_id` 로 구분)로. Fluent 는 배치당 한 번 기동, 케이스당 20 s–1분 | Ansys Fluent 설치 + 솔버 라이선스 1석 |
+| **JSON 생성기** | 설계 테이블 CSV(`Parameters.csv`) → 설계 폴더마다 `boundary_conditions.json` (Stochos 학습용) | 없음 |
+
+사용 방법은 **[USER_GUIDE.md](USER_GUIDE.md)** 에 있습니다.
+
+## 설치와 실행
+
+1. Python 3.10 이상이 설치되어 있어야 합니다 (검증: 3.12).
+2. `setup_and_run.bat` 를 더블클릭합니다. 가상환경을 만들고 의존성을 설치한 뒤 앱을 띄웁니다.
+   - 이후에는 같은 `.bat` 를 다시 실행하면 바로 앱이 뜹니다.
+3. 직접 실행하려면:
+   ```bash
+   pip install -r requirements.txt
+   python pv_export_gui.py
+   ```
+   `pvpython` 이 아니라 **일반 `python`** 으로 실행합니다.
+
+## 요구사항
+
+| 구성 | 필요한 경우 | 비고 |
+|---|---|---|
+| PySide6, pyvista (`requirements.txt`) | 항상 | pip 로 설치됨. PyVista 엔진은 이것만으로 동작 |
+| ansys-fluent-core (`requirements.txt`) | PyFluent 변환기 탭 | pip 로 설치됨. 없으면 그 탭만 비활성 |
+| Ansys Fluent 설치 + 솔버 라이선스 | PyFluent 변환기 탭 | 환경변수 `AWP_ROOTnnn` 으로 설치 위치를 찾음 (검증: 2026 R1) |
+| ParaView 6.1 | PyVista 변환기에서 ParaView 엔진을 고를 때 | `pvpython.exe` 자동 탐지 |
 
 ## 파일 구성
 
 | 파일 | 설명 |
 |---|---|
-| `pv_export_gui.py` | PySide6 GUI 앱 (일반 python으로 실행) — 두 탭의 메인 창 |
-| `dp_collect_tab.py` | "Workbench DP 정리" 탭 (순수 python, ParaView 불필요) |
-| `pv_export_worker.py` | 변환 워커 (pvpython이 실행, 변환 탭이 자동 호출) |
-| `requirements.txt` | GUI 실행에 필요한 Python 의존성 (PySide6) |
-| `USER_GUIDE.md` | **사용자 가이드** — 설치, 사용법, 항목 설명, FAQ |
-| `LICENSE` | MIT 라이선스 전문 |
+| `pv_export_gui.py` | 앱 본체 (탭 4개) |
+| `app_theme.py` | 화면 테마 (Solarized Light) |
+| `dp_collect_tab.py` | Workbench DP 정리 탭 |
+| `bc_json_gen.py` | JSON 생성기 (명령줄로도 실행 가능) |
+| `session_log.py` | 세션 로그 (`logs/`) |
+| `cff_common.py` | 공용: 변수 표시명 매핑표, 데이터 파일 이름 해석 |
+| `cff_export_worker.py` | PyVista 변환 워커 |
+| `pv_export_worker.py` | ParaView 변환 워커 (pvpython 이 실행) |
+| `pyfluent_export_worker.py`, `pyfluent_mesh.py` | PyFluent 변환 워커와 격자 조립 |
+| `requirements.txt`, `setup_and_run.bat` | 설치·실행 |
+| `docs/` | 설계 결정 기록, 워커 프로토콜, 검증 기록, 작업 일지 |
 
-## 빠른 시작
-
-```bash
-# 1. 의존성 설치 (venv에서)
-pip install -r requirements.txt
-
-# 2. .py 파일들을 같은 폴더에 두고 GUI 실행 (일반 python!)
-python pv_export_gui.py
-```
-
-> ⚠️ "CFF To VTK" 탭은 별도로 설치된 ParaView(pvpython 포함)가 필요합니다(pip로는 설치 불가).
-> "Workbench DP 정리" 탭은 순수 파이썬으로 동작하여 ParaView 없이도 사용할 수 있습니다.
-> 자세한 내용은 `USER_GUIDE.md`를 참고하세요.
-
-## 핵심 요약
-
-- **구조**: 상단 탭으로 두 도구 스위칭. GUI(PySide6, 일반 python) + 변환 워커(pvpython) 분리
-- **DP 정리 탭**: `dp*` 폴더 재귀 탐색 → Case/Data를 DP 번호 제로패딩으로 복사·통일(dp1 → `dp_001.cas.h5`/`dp_001.dat.h5`).
-  Data 여러 개면 반복횟수 최대 선택, 완료 후 CSV+요약 로그 생성
-- **변환 탭**: Fluent CFF → VTM/VTU 배치 변환(100개+). VTM 기본(영역 구조 유지)·VTU 옵션(단일 grid),
-  내부 데이터 파일명은 `Results.vtu`로 통일, 출력 폴더는 접두사+순번(`Design_001` …)
-- **연계**: DP 정리 결과(`dp_001.cas.h5`/`dp_001.dat.h5`)는 변환 탭에 바로 투입 가능.
-  변환 탭은 입력 파일명의 dp 번호를 폴더 번호로 이어받습니다 (`dp_016` → `Design_016`)
+모든 `.py` 는 **같은 폴더**에 있어야 합니다. 앱이 같은 폴더의 워커를 찾아 실행합니다.
 
 ## 라이선스
 
-이 프로젝트는 [MIT 라이선스](LICENSE)로 배포됩니다. 상업적 이용을 포함해 자유롭게
-사용·수정·재배포할 수 있으며, 저작권 표시와 라이선스 전문만 함께 포함하면 됩니다.
+이 프로젝트는 [MIT 라이선스](LICENSE)입니다. 외부 의존성: PySide6(LGPLv3), PyVista/VTK(MIT/BSD-3), ParaView(BSD-3, 사용자 설치), ansys-fluent-core(MIT, Fluent 본체는 별도 라이선스).
+PySide6 를 포함한 단일 실행 파일로 **배포**할 때는 LGPLv3 의 재링크 의무가 생깁니다. 소스 형태로 쓰거나 배포하면 해당되지 않습니다.
 
-### 서드파티 고지
-
-본 저장소의 코드에는 서드파티 소스가 포함되어 있지 않으며, 아래 소프트웨어를
-외부 의존성으로 사용합니다.
-
-| 소프트웨어 | 라이선스 | 사용 방식 |
-|---|---|---|
-| [PySide6](https://doc.qt.io/qtforpython/) | LGPLv3 / 상용 | `pip` 설치, GUI 프레임워크 |
-| [ParaView](https://www.paraview.org/) (`paraview.simple`) | BSD-3-Clause | 사용자가 별도 설치, 변환 엔진 |
-
-> PySide6를 포함한 단일 실행 파일(예: PyInstaller `--onefile`)을 만들어 **배포**하는
-> 경우에는 LGPLv3의 재링크 관련 의무가 추가로 발생합니다. 소스 형태로 배포하거나
-> 개인적으로 사용하는 경우에는 해당되지 않습니다.
-
-ANSYS, Fluent, Workbench, optiSLang은 ANSYS, Inc.의 상표이며, Stochos는 Stochos의
-상표입니다. 본 프로젝트는 이들 회사와 제휴·후원 관계가 없습니다.
+ANSYS, Fluent, Workbench 는 ANSYS, Inc. 의 상표이고 Stochos 는 Stochos 의 상표입니다. 이 프로젝트는 두 회사와 관계가 없습니다.
