@@ -52,9 +52,49 @@ def get_point_arrays(source):
     return arrays
 
 
+_PREPARED = None   # 현재 열어 둔 PreparedCase (임시 링크 폴더 정리용)
+
+
+def prepare_case(case_path):
+    """데이터 파일 이름 해석 (cff_common.PreparedCase). dat 가 없으면 None 을 반환하고 사유를 출력한다.
+    Workbench 원본(FFF.3-2.cas.h5 + FFF.3-2-11200.dat.h5)은 임시 하드링크로 이름을 맞춰 연다."""
+    global _PREPARED
+    try:
+        from cff_common import PreparedCase, remove_stale_link_dirs
+    except ImportError as e:
+        # 데이터 파일 이름 해석 없이 열면 "변수 0개" 버그가 조용히 재발하므로 치명으로 처리
+        print("[ERROR] cff_common.py 를 찾지 못했습니다 (워커와 같은 폴더에 있어야 합니다): %s" % str(e)[:80], flush=True)
+        sys.exit(1)
+    log = lambda m: print(m, flush=True)
+    remove_stale_link_dirs(os.path.dirname(str(case_path)) or ".", log=log, min_age_sec=600)
+    pc = PreparedCase(case_path, log=log)
+    print("  데이터 파일: %s" % pc.describe(), flush=True)
+    if pc.data_file is None:
+        pc.cleanup()
+        return None
+    _PREPARED = pc
+    return pc.case_to_open
+
+
+def cleanup_prepared():
+    """리더를 Delete 한 뒤 호출. 임시 링크 폴더를 지운다. 못 지우면 종료 시 재시도, 그래도 남으면 GUI 가 정리."""
+    global _PREPARED
+    if _PREPARED is None:
+        return
+    left = _PREPARED.cleanup(retries=3, delay=0.2)
+    if left:
+        # 실측: 프로세스의 첫 CFF 리더는 종료 때까지 HDF5 핸들을 놓지 않는다 → GUI 가 워커 종료 직후 정리
+        print("  임시 링크 폴더(%s)는 프로세스 종료 후 정리됩니다 (하드링크라 용량 차지 없음)" % os.path.basename(left), flush=True)
+        _PREPARED.cleanup_at_exit()
+    _PREPARED = None
+
+
 def load_reader(case_path):
-    """CFF 파일을 열고 모든 cell array를 활성화."""
-    reader = OpenDataFile(str(case_path))
+    """CFF 파일을 열고 모든 cell array를 활성화. 데이터 파일을 못 찾으면 None."""
+    case_to_open = prepare_case(case_path)
+    if case_to_open is None:
+        return None
+    reader = OpenDataFile(str(case_to_open))
     if reader is None:
         return None
     for attr in ("CellArrays", "CellArrayStatus", "Cellarrays"):
@@ -114,6 +154,43 @@ def rename_vtm_inner_files(vtm_path, new_base):
     return renamed
 
 
+def rename_vtu_arrays(vtu_path, ascii=False):
+    """결정 002 R1: 저장된 .vtu 를 vtk XML 로 되읽어 Cell Data 이름을 Fluent 표시명으로 바꾸고 다시 쓴다.
+    매핑표는 같은 폴더의 cff_var_names.py (pvpython 은 스크립트 폴더를 sys.path 에 넣는다)."""
+    try:
+        from cff_common import plan_renames
+        from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridReader, vtkXMLUnstructuredGridWriter
+    except ImportError as e:
+        print("[WARN] 표시명 변경 불가 (모듈 없음): %s" % str(e)[:80], flush=True)
+        return
+    reader = vtkXMLUnstructuredGridReader()
+    reader.SetFileName(str(vtu_path))
+    reader.Update()
+    ds = reader.GetOutput()
+    cd = ds.GetCellData()
+    names = [cd.GetArray(i).GetName() for i in range(cd.GetNumberOfArrays())]
+    renames, unmapped = plan_renames(names)
+    if not renames:
+        if unmapped:
+            print("[WARN] 표시명 없음(원본 유지): %s" % unmapped, flush=True)
+        return
+    for i in range(cd.GetNumberOfArrays()):
+        arr = cd.GetArray(i)
+        if arr.GetName() in renames:
+            arr.SetName(renames[arr.GetName()])
+    writer = vtkXMLUnstructuredGridWriter()
+    writer.SetFileName(str(vtu_path))
+    writer.SetInputData(ds)
+    if ascii:
+        writer.SetDataModeToAscii()
+    else:
+        writer.SetDataModeToAppended()
+    writer.Write()
+    print("  [RENAME] %s" % ", ".join("%s→%s" % kv for kv in renames.items()), flush=True)
+    if unmapped:
+        print("[WARN] 표시명 없음(원본 유지): %s" % unmapped, flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ParaView CFF -> VTU/VTM 변환 워커 (pvpython 전용)"
@@ -135,6 +212,8 @@ def main():
                         help="ASCII 형식 저장")
     parser.add_argument("--inner-name", type=str, default=None,
                         help="VTM 내부 .vtu 파일명 통일 (예: Results). 미지정 시 ParaView 기본 이름 유지")
+    parser.add_argument("--rename", action="store_true",
+                        help="VTU 저장 뒤 Cell Data 이름을 Fluent 표시명으로 변경 (SV_P→pressure …, cff_var_names.py 표). VTM 에는 적용 안 됨")
     args = parser.parse_args()
 
     case_path = Path(args.case)
@@ -149,8 +228,9 @@ def main():
         reader = load_reader(case_path)
         if reader is None:
             # 에러 JSON도 마커로 감싸 GUI가 에러 분기로 인식하도록
+            base = case_path.name[:-len(".cas.h5")] if case_path.name.lower().endswith(".cas.h5") else case_path.stem
             print("###JSON_START###", flush=True)
-            print(json.dumps({"error": "Cannot open file"}), flush=True)
+            print(json.dumps({"error": "파일을 열 수 없거나 데이터 파일(.dat.h5)이 없습니다: %s.dat.h5 또는 %s-<반복횟수>.dat.h5 가 같은 폴더에 있어야 합니다" % (base, base)}), flush=True)
             print("###JSON_END###", flush=True)
             sys.exit(1)
         # VTU 관점(merge 후)의 cell arrays를 기준으로 제공
@@ -171,6 +251,7 @@ def main():
         print("###JSON_END###", flush=True)
         Delete(merged)
         Delete(reader)
+        cleanup_prepared()
         sys.exit(0)
 
     # ==========================================================
@@ -191,24 +272,17 @@ def main():
 
     print("[1] 입력 파일 검증", flush=True)
     print("  [OK] %s (%.2f MB)" % (case_path.name, case_path.stat().st_size / 1024**2), flush=True)
-    name = case_path.name
-    if name.lower().endswith(".cas.h5"):
-        dat_path = case_path.with_name(name[:-len(".cas.h5")] + ".dat.h5")
-    else:
-        dat_path = None
-    if dat_path and dat_path.exists():
-        print("  [OK] %s (%.2f MB)" % (dat_path.name, dat_path.stat().st_size / 1024**2), flush=True)
-
     print("[PROGRESS] 10", flush=True)
 
     # ==========================================================
-    # CFF 로드
+    # CFF 로드 (데이터 파일 이름 해석 포함: load_reader → prepare_case)
     # ==========================================================
     print("[2] CFF 파일 로딩 중...", flush=True)
     start = time.time()
     reader = load_reader(case_path)
     if reader is None:
-        print("[ERROR] 파일을 열 수 없습니다.", flush=True)
+        base = case_path.name[:-len(".cas.h5")] if case_path.name.lower().endswith(".cas.h5") else case_path.stem
+        print("[ERROR] 파일을 열 수 없거나 데이터 파일(.dat.h5)이 없습니다: %s.dat.h5 또는 %s-<반복횟수>.dat.h5 가 같은 폴더에 있어야 합니다" % (base, base), flush=True)
         sys.exit(1)
     print("  [OK] 로딩 완료 (%.2f초)" % (time.time() - start), flush=True)
     print("[PROGRESS] 40", flush=True)
@@ -284,7 +358,11 @@ def main():
             FieldDataArrays=[],
             DataMode=data_mode,
         )
+        if args.rename:
+            rename_vtu_arrays(output_path, ascii=args.ascii)
     else:
+        if args.rename:
+            print("[WARN] --rename 은 VTU 에만 적용됩니다 (VTM 생략).", flush=True)
         # VTM: Multi-block writer. ChooseArraysToWrite + CellDataArrays
         # VTM writer는 DataMode가 없을 수 있으므로 방어적으로 처리
         if args.ascii:
@@ -321,6 +399,7 @@ def main():
     if out_format == "vtu":
         Delete(target)
     Delete(reader)
+    cleanup_prepared()
 
     # VTM은 .vtm + 하위 폴더가 생성됨
     if output_path.exists():

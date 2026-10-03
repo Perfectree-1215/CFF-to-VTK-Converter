@@ -8,6 +8,8 @@ DP 번호 제로패딩 이름(dp_000, dp_001, ...)으로 이름을 통일한다.
 
   - Case/Data 모두 동일 base 로 변경: dp_001.cas.h5 + dp_001.dat.h5
     → 기존 CFF 변환기(워커가 .cas.h5↔.dat.h5 치환 페어링)에 바로 투입 가능
+    (변환기가 FFF.3-2-11200.dat.h5 같은 반복 횟수 접미사도 임시 링크로 해석하므로
+     원본 폴더를 직접 변환할 수도 있다. 이 탭은 DP 번호를 폴더명으로 잇고 싶을 때 쓴다)
   - Data가 여러 개면 파일명 끝 반복횟수(-1200 등)가 가장 큰 것 선택
   - 저장 구조: (A) 이름별 폴더 생성 / (B) 한 폴더에 모두
   - 완료 후 원본↔변경 매핑 로그(CSV + 요약 txt) 생성
@@ -24,10 +26,11 @@ from pathlib import Path
 import session_log
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor
+from app_theme import COLOR_HINT, COLOR_WARN, ConsoleEdit, append_log, set_role   # Solarized Light 테마 (v2.0)
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
-    QPushButton, QFileDialog, QPlainTextEdit, QProgressBar, QGroupBox,
+    QPushButton, QFileDialog, QProgressBar, QGroupBox,
     QRadioButton, QButtonGroup, QCheckBox, QMessageBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QAbstractItemView,
 )
@@ -414,6 +417,13 @@ class DPCollectWorker(QThread):
 # ============================================================
 # 탭 위젯
 # ============================================================
+class _DPTable(QTableWidget):
+    """DP 표. 기본 선호 높이(192px)를 낮춰 작은 화면에서 탭 페이지가 덜 길어지게 한다 (큰 화면에서는 stretch 로 커진다)."""
+    def sizeHint(self):
+        from PySide6.QtCore import QSize
+        return QSize(640, 150)
+
+
 class DPCollectTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -429,11 +439,10 @@ class DPCollectTab(QWidget):
         root.setContentsMargins(14, 14, 14, 14)
 
         title = QLabel("Workbench Design Point 정리 (Case/Data 수집·이름변경)")
-        tf = QFont(); tf.setPointSize(15); tf.setBold(True)
-        title.setFont(tf)
+        set_role(title, "title")
         root.addWidget(title)
         subtitle = QLabel("각 DP(dp0, dp1, …)의 Fluent Case/Data를 복사하면서 DP 이름으로 통일")
-        subtitle.setStyleSheet("color: #888;")
+        set_role(subtitle, "subtitle")
         root.addWidget(subtitle)
 
         # --- 1. 입력 폴더 ---
@@ -453,7 +462,7 @@ class DPCollectTab(QWidget):
 
         hdr = QHBoxLayout()
         self.count_label = QLabel("폴더를 선택하고 스캔하세요")
-        self.count_label.setStyleSheet("color: #888;")
+        set_role(self.count_label, "hint")
         hdr.addWidget(self.count_label)
         hdr.addStretch()
         self.select_all_btn = QPushButton("전체 선택")
@@ -464,18 +473,14 @@ class DPCollectTab(QWidget):
         hdr.addWidget(self.deselect_all_btn)
         in_outer.addLayout(hdr)
 
-        self.table = QTableWidget(0, 6)
+        self.table = _DPTable(0, 6)
         self.table.setHorizontalHeaderLabels(
             ["선택", "DP", "Case 파일", "Data 파일", "반복횟수", "상태"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.table.setMinimumHeight(200)
-        self.table.setStyleSheet(
-            "QTableWidget { background-color: #252525; color: #c8c8c8; "
-            "gridline-color: #444; border: 1px solid #444; }"
-            "QHeaderView::section { background-color: #333; color: #ddd; "
-            "border: 0px; padding: 4px; }")
+        self.table.setMinimumHeight(140)
+        self.table.setAlternatingRowColors(True)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -500,7 +505,7 @@ class DPCollectTab(QWidget):
         self.suffix_edit.textChanged.connect(self._update_preview)
         name_layout.addWidget(self.suffix_edit, 0, 3)
         self.preview_label = QLabel()
-        self.preview_label.setStyleSheet("color: #4ec9b0;")
+        set_role(self.preview_label, "status")
         name_layout.addWidget(self.preview_label, 1, 0, 1, 4)
         root.addWidget(name_group)
         self._update_preview()
@@ -540,11 +545,11 @@ class DPCollectTab(QWidget):
         run_row = QHBoxLayout()
         self.run_btn = QPushButton("수집·이름변경 실행")
         self.run_btn.setMinimumHeight(40)
-        rf = QFont(); rf.setBold(True)
-        self.run_btn.setFont(rf)
+        set_role(self.run_btn, "primary")
         self.run_btn.clicked.connect(self._run)
         self.cancel_btn = QPushButton("중단")
         self.cancel_btn.setMinimumHeight(40)
+        set_role(self.cancel_btn, "danger")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel)
         self.open_btn = QPushButton("출력 폴더 열기")
@@ -557,7 +562,7 @@ class DPCollectTab(QWidget):
         root.addLayout(run_row)
 
         self.overall_label = QLabel("대기 중")
-        self.overall_label.setStyleSheet("color: #d0d0d0;")
+        set_role(self.overall_label, "status")
         root.addWidget(self.overall_label)
         self.progress = QProgressBar()
         self.progress.setValue(0)
@@ -566,12 +571,10 @@ class DPCollectTab(QWidget):
         # --- 5. 콘솔 ---
         console_group = QGroupBox("로그")
         console_layout = QVBoxLayout(console_group)
-        self.console = QPlainTextEdit()
+        self.console = ConsoleEdit()
         self.console.setReadOnly(True)
-        cf = QFont("Consolas"); cf.setStyleHint(QFont.Monospace); cf.setPointSize(9)
-        self.console.setFont(cf)
-        self.console.setStyleSheet(
-            "QPlainTextEdit { background-color: #1e1e1e; color: #d4d4d4; }")
+        self.console.setMinimumHeight(90)
+        set_role(self.console, "console")
         console_layout.addWidget(self.console)
         root.addWidget(console_group, 1)
 
@@ -596,12 +599,12 @@ class DPCollectTab(QWidget):
 
         if not self.records:
             self.count_label.setText("⚠️  dp 폴더를 찾지 못했습니다")
-            self.count_label.setStyleSheet("color: #e0a030;")
+            set_role(self.count_label, "warn")
             self._log("[스캔] dp<번호> 폴더가 없습니다.")
             return
         ok = sum(1 for r in self.records if r["status"] == STATUS_OK)
         self.count_label.setText("✅ DP %d개 발견 (정상 %d)" % (len(self.records), ok))
-        self.count_label.setStyleSheet("color: #4ec9b0;")
+        set_role(self.count_label, "ok")
         self._log("[스캔] DP %d개 (정상 %d)" % (len(self.records), ok))
 
     def _populate_table(self):
@@ -627,7 +630,7 @@ class DPCollectTab(QWidget):
             self.table.setItem(r, 4, QTableWidgetItem(it))
             status_item = QTableWidgetItem(rec["status"])
             if rec["status"] != STATUS_OK:
-                status_item.setForeground(Qt.gray if rec["status"] == STATUS_EMPTY else Qt.yellow)
+                status_item.setForeground(QColor(COLOR_HINT if rec["status"] == STATUS_EMPTY else COLOR_WARN))
             self.table.setItem(r, 5, status_item)
 
     def _set_all(self, checked):
@@ -814,7 +817,5 @@ class DPCollectTab(QWidget):
 
     # --------------------------------------------------------
     def _log(self, msg):
-        self.console.appendPlainText(msg)
-        sb = self.console.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        append_log(self.console, msg)
         session_log.write(msg, tag="DP정리")

@@ -1,25 +1,34 @@
 # ==========================================================
-# CFF → VTM/VTU 배치 변환기 — Python 의존성
+# CFF → VTK(VTU/VTP/VTM) 배치 변환기 — Python 의존성
 # ==========================================================
-# 이 파일은 GUI(pv_export_gui.py) 실행 환경(일반 Python / venv)용입니다.
+# GUI(pv_export_gui.py), PyVista 워커(cff_export_worker.py), PyFluent 워커(pyfluent_export_worker.py)를
+# 같은 venv 하나에서 실행합니다 (결정 001 D6, 결정 004).
 #
 # 설치:
 #   pip install -r requirements.txt
 #
-# 요구 Python: 3.9 이상
+# 요구 Python: 3.10 이상 (검증: 3.12.9)
 # ==========================================================
 
 # GUI 프레임워크 (pv_export_gui.py)
 PySide6
 
+# PyVista 엔진: 체적 .vtu + 외곽 표면 .vtp (cff_export_worker.py)
+# vtk 가 함께 설치됩니다. 검증 버전: pyvista 0.49.0 / vtk 9.7.1
+pyvista>=0.47,<1.0
+
+# PyFluent 변환기 탭 (pyfluent_export_worker.py): 라이브 Fluent 솔버 세션. 검증 버전: 0.42.1 + Fluent 2026 R1
+# [reader] 는 h5py 를 함께 설치해 케이스 차원(2D/3D)을 Fluent 기동 전에 읽는 데 씁니다.
+ansys-fluent-core[reader]>=0.42
+
 # ----------------------------------------------------------
 # 참고: pip로 설치하지 않는 의존성
 # ----------------------------------------------------------
-# - ParaView 6.1.0 (권장): pvpython 포함. 실제 변환 엔진.
+# - ParaView 6.1 (선택): "ParaView(pvpython)" 엔진과 VTM 포맷을 쓸 때만 필요.
 #     공식 사이트에서 별도 설치: https://www.paraview.org/download/
 #     워커(pv_export_worker.py)는 ParaView 내장 pvpython으로 실행되며
 #     paraview.simple 모듈을 사용합니다. (pip 설치 불가)
 #
-# - 표준 라이브러리만 사용 (별도 설치 불필요):
-#     argparse, csv, datetime, glob, json, os, re, shutil, subprocess, sys, time, pathlib, xml.etree
-
+# - Ansys Fluent 설치 + 라이선스: "PyFluent 변환기" 탭에서만 필요 (케이스마다 솔버 세션 1개, 라이선스 1석).
+#     설치 위치는 환경변수 AWP_ROOTnnn 으로 찾습니다 (기본: 가장 높은 버전).
+#   변환기 탭(PyVista/ParaView)은 라이선스 없이 결과 파일(.cas.h5/.dat.h5)만 읽습니다.
