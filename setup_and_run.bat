@@ -9,7 +9,7 @@ REM "PROJECT_NAME"과 "SCRIPT_NAME"을 확인 및 변경 후 실행.
 
 setlocal
 
-set "PROJECT_NAME=CFF2VTK_venv"
+set "PROJECT_NAME=Common_venv"
 set "SCRIPT_NAME=pv_export_gui.py"
 
 set "VENV_DIR=D:\Venvs_collec\%PROJECT_NAME%\venv"
